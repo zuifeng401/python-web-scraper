@@ -1,2 +1,2 @@
 # python-web-scraper
-Python Web Scraper Portfolio | API Reverse Engineering
+Python Web Scraper Portfolio |26+ Projects

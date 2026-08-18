@@ -1,130 +1,67 @@
-# 一品威客 - signature双重加密逆向
+# 一品威客 signature 参数逆向记录
 
-## 项目信息
+目标页面：[https://www.epwk.com/login.html](https://link.wtturl.cn/?target=https%3A%2F%2Fwww.epwk.com%2Flogin.html&scene=im&aid=497858&lang=zh)
 
-- **网站**：https://www.epwk.com/login.html
-- **难度**：⭐⭐⭐⭐（中高级）
-- **技术**：MD5签名 + AES-CBC双重加密
-- **完成时间**：2024
+打开一品威客登录页，填好账号密码抓登录接口，看请求载荷发现明文没加密，但请求头里多了个 signature。我重复提交了好几次登录，对比每一次的请求头，这个参数每次数值都不一样，确定这就是要逆向的签名参数。
 
----
+## 找加密入口
 
-## 技术亮点
+一开始直接在网站 JS 文件里搜 signature，搜出来两处结果，其中一段代码看着关联性很强；另外也可以直接搜接口路径 user/login 来找，两种方法都行，最后都得一步步跟调用栈。
 
-### 🔥 双重加密链路
+找到可疑代码后在这行打上断点：
+
 ```
-原始数据 → MD5签名 → AES-CBC加密 → signature参数
-```
-
-这是典型的"签名+加密"双重保护机制，比单一加密更复杂。
-
----
-
-## 逆向过程
-
-### Step 1：参数定位
-
-登录页面抓包，发现请求头中的`signature`参数每次都不同。
-
-**定位方法**：
-1. 全局搜索 `signature` 关键词
-2. 找到可疑代码：
-```javascript
 j.Signature = Object(f.a)(j, L, h.i ? h.f : h.c);
 ```
-3. 下断点跟栈，进入加密函数
 
----
+重新触发登录提交，代码正好断在这里，我把相关变量复制到浏览器控制台跑了一遍，输出的字符串和抓包拿到的 signature 格式完全对得上，确认这里就是生成签名的入口。
 
-### Step 2：加密链路分析
+顺着调用栈一步一步往里跟，追到了真正组装加密内容的函数 h：
 
-跟进加密函数，发现双重加密：
-
-```javascript
+```
 h = function(t) {
     var data = arguments.length > 1 && void 0 !== arguments[1] ? arguments[1] : {}
-    var e = arguments.length > 2 && void 0 !== arguments[2] ? arguments[2] : "a75846eb4ac490420ac63db46d2a03bf"
-    var n = e + f(data) + f(t) + e;
-    
-    // 第一步：MD5
-    n = d(n)
-    
-    // 第二步：AES
+      , e = arguments.length > 2 && void 0 !== arguments[2] ? arguments[2] : "a75846eb4ac490420ac63db46d2a03bf"
+      , n = e + f(data) + f(t) + e;
+    return n = d(n),
     n = v(n)
-    
-    return n
 }
 ```
 
----
+逻辑很清晰：先拿固定盐值 e、序列化后的请求参数 data、接口路径 t 拼出字符串 n，先过一层 d 加密，加密完的结果再丢进 v 函数二次加密，最后返回的结果就是接口要的 signature。
 
-### Step 3：拆解加密算法
+## 拆解两层加密算法
 
-#### 第一层：MD5签名
-```javascript
+### 第一层 d 函数
+
+```
 d = function(data) {
     return o.a.MD5(data).toString()
 }
 ```
 
-#### 第二层：AES-CBC加密
-```javascript
-v = function(data) {
-    return o.a.AES.encrypt(data, l.key, {
-        iv: l.iv,
-        mode: o.a.mode.CBC,
-        padding: o.a.pad.Pkcs7
-    }).toString()
+很直观，就是标准 MD5 哈希，把拼接好的长字符串做 MD5 处理。
+
+### 第二层 v 函数
+
+```
+, v = function(data) {
+    return function(data) {
+        return o.a.AES.encrypt(data, l.key, {
+            iv: l.iv,
+            mode: o.a.mode.CBC,
+            padding: o.a.pad.Pkcs7
+        }).toString()
+    }(data)
 }
 ```
 
----
+第二层是 AES 加密，模式 CBC，Pkcs7 填充，用代码里定义好的 key 和 iv 对 MD5 结果再加密一次，最终密文放到请求头。
 
-## 核心参数
+## 本地复现
 
-- **签名密钥**：`a75846eb4ac490420ac63db46d2a03bf`
-- **AES密钥**：在`l.key`中
-- **AES模式**：CBC
-- **填充方式**：Pkcs7
+把完整流程捋顺：固定盐值拼接参数与接口路径 → MD5 加密 → AES-CBC 二次加密，按照这个逻辑在本地写代码还原签名生成逻辑
 
----
+![image-20260816145334733](./image-20260816145001810.png)
 
-## 本地实现
-
-![本地实现](./image-20260816145001810.png)
-
----
-
-## 学到的经验
-
-1. **双重加密识别**：先MD5签名，再AES加密，这是常见的安全加固方案
-2. **跟栈技巧**：从参数使用处反向追踪到加密入口
-3. **参数搜索**：除了搜参数名，还可以搜API路径（如`user/login`）
-
----
-
-## 商业价值
-
-这个案例展示了处理**多层加密**的能力，市场上很多网站都采用这种"签名+加密"的方案，掌握后可以接类似的高价值项目（¥1000-2000/单）。
-
----
-
-## 相关项目
-
-- [财新网密码加密](../财新网/)
-- [烯牛数据payload+sig双参数](../烯牛数据/)
-- [七麦数据OB混淆](../七麦/)
-
----
-
-## ⚠️ 免责声明
-
-**本项目仅供学习交流使用，请勿用于非法用途。**
-
-- 本案例用于技术研究和学习目的
-- 请遵守目标网站的robots.txt协议和服务条款
-- 请勿用于商业爬虫、数据售卖等违法行为
-- 请勿对目标网站进行高频请求，避免影响正常服务
-- 使用本项目代码产生的一切后果由使用者自行承担
-
-**技术无罪，使用需谨慎。请合法合规使用爬虫技术。**
+固定盐值 + 序列化请求参数 + 序列化接口路径 + 固定盐值 → MD5 哈希 → AES-CBC 加密 → 输出密文作为请求头 signature

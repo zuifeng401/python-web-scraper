@@ -1,189 +1,106 @@
-# 七麦数据 - OB混淆代码逆向
+# 七麦数据 analysis 参数逆向笔记
 
-## 项目信息
+目标网站：[https://www.qimai.cn/](https://link.wtturl.cn/?target=https%3A%2F%2Fwww.qimai.cn%2F&scene=im&aid=497858&lang=zh) 这次要逆向的是接口里的 analysis 加密参数。
 
-- **网站**：https://www.qimai.cn/
-- **难度**：⭐⭐⭐⭐⭐（高级）
-- **技术**：OB混淆逆向 + 异或加密 + 双层函数拆解
-- **完成时间**：2024
+打开七麦数据网页，刷新页面抓接口，我需要的榜单数据接口地址是： [https://api.qimai.cn/indexV2/getIndexRank?analysis=eyEzECU8OEd1EhgKCgVcTjNUSA8dDTNbVVIbNgBXXSVFVlpNT04FAAVWVFkBdkZV&setting=0&genre=5000](https://link.wtturl.cn/?target=https%3A%2F%2Fapi.qimai.cn%2FindexV2%2FgetIndexRank%3Fanalysis%3DeyEzECU8OEd1EhgKCgVcTjNUSA8dDTNbVVIbNgBXXSVFVlpNT04FAAVWVFkBdkZV%26setting%3D0%26genre%3D5000&scene=im&aid=497858&lang=zh) 多次重复发起请求测试，观察到 analysis 参数每次请求的值都不一样，确定这个动态参数就是本次逆向目标。
 
----
+## 定位加密入口
 
-## 技术亮点
+一开始还是老办法，直接全局关键词搜 `analysis`，结果页面 JS 里完全匹配不到这个词，这条路走不通。 换思路，直接检索接口路径 `indexV2/getIndexRank`，搜出来两处相关代码，第一处就是页面发起请求的地方：
 
-### 🔥 OB混淆代码逆向（市场稀缺技能）
-
-**OB混淆特点**：
-- 变量名全是无意义单字母
-- 随机命名，完全读不懂
-- 市面上最常见的混淆方式
-
-**调试技巧**：
-- 鼠标悬浮在变量上，浏览器自动显示真实值
-- 不用手动解混淆
-- 大幅降低调试难度
-
----
-
-## 逆向过程
-
-### Step 1：参数搜索失败
-
-- 全局搜索`analysis`关键词 → 无结果
-- 换思路：搜索API路径`indexV2/getIndexRank`
-- 找到2处相关代码
-
----
-
-### Step 2：定位加密入口
-
-**请求函数**：
-```javascript
+```
 getData: function(t) {
     var a = this;
     this.loading = !0;
     var e = this.getReqestParams(t);
     this.$http.get("/indexV2/getIndexRank", {
-        params: e
-    }).then(...)
-}
-```
-
-在`getReqestParams`打断点 → 跟栈 → 进入OB混淆代码
-
----
-
-### Step 3：OB混淆代码分析
-
-**混淆代码示例**：
-```javascript
-o()[Wt][Kt][Ut](function(t) {
-    try {
-        var n;
-        f || $ != s || (n = (0, i[Zt])(m),
-        s = c[x][k][Rt] = -(0, i[Zt])(l) || +new R[K] - r2 * n);
-        var e, r = +new R[K] - (s || H) - 1661224081041, a = [];
-        
-        // 核心生成语句
-        e = (0, i[Jt])((0, i[Qt])(a, d))
-        
-        -B == t[qt][O](v) && (t[qt] += (-B != t[qt][O](Bn) ? Nn : Bn) + v + B5 + R[V5](e)),
-        t
-    } catch (t) {}
-}
-```
-
-**关键发现**：
-- 传入时`t`没有analysis参数
-- 执行完后`t`有了analysis
-- 核心语句：`e = (0,i[Jt])((0,i[Qt])(a, d))`
-
----
-
-### Step 4：双层函数拆解
-
-#### 第一层：异或加密（内层）
-```javascript
-function h(n, t) {
-    t = t || u();
-    for (var e = (n = n[$5](N))[z], r = t[z], a = q5, i = H; i < e; i++)
-        n[i] = o(n[i][a](H) ^ t[(i + 10) % r][a](H));
-    return n[I5](N)
-}
-```
-
-**逻辑**：对每个字符做异或运算
-
-#### 第二层：转码处理（外层）
-```javascript
-function p(t) {
-    t = R[V5](t)[T](/%([0-9A-F]{2})/g, function(n, t) {
-        return o(Y5 + t)
-    });
-    try {
-        return R[Q5](t)
-    } catch (n) {
-        return R[W5][K5](t)[U5](Z5)
+    params: e
+    }).then((function(t) {
+    a.loading = !1;
+    var e = t.data;
+    1e4 === e.code ? a.rankReqSuccess(e) : a.rankReqFailed(e)
     }
+    )).catch((function(t) {
+    a.$Message.destroy(),
+    a.$Message.error("网络错误，请稍后重试")
+    }
+    ))
 }
 ```
 
-**逻辑**：URL编码 + Base64处理
+我在这段代码打上断点，刷新页面触发接口，程序成功断住。顺着调用栈一步步往里跟，追到了一段经过 OB 混淆的代码块：
 
----
+```
+o()[Wt][Kt][Ut](function(t) {
+                try {
+                    var n;
+                    f || $ != s || (n = (0,
+                    i[Zt])(m),
+                    s = c[x][k][Rt] = -(0,
+                    i[Zt])(l) || +new R[K] - r2 * n);
+                    var e, r = +new R[K] - (s || H) - 1661224081041, a = [];
+                    return void 0 === t[Ot] && (t[Ot] = {}),
+                    R[W][o7](t[Ot])[M](function(n) {
+                        if (n == v)
+                            return !B;
+                        t[Ot][_2](n) && a[b](t[Ot][n])
+                    }),
+                    a = a[jt]()[I5](N),
+                    a = (0,
+                    i[Jt])(a),
+                    a = (a += p + t[qt][T](t[Tt], N)) + (p + r) + (p + 3),
+                    e = (0,
+                    i[Jt])((0,
+                    i[Qt])(a, d)),
+                    -B == t[qt][O](v) && (t[qt] += (-B != t[qt][O](Bn) ? Nn : Bn) + v + B5 + R[V5](e)),
+                    t
+                } catch (t) {}
+            }
+```
 
-## OB混淆调试技巧（核心价值）
+这里能明显看出逻辑：变量`t`刚传入的时候，请求参数里还没有 analysis，走到这段代码执行完之后，t 内就生成好了 analysis，能确定加密逻辑就藏在这段 OB 混淆代码里。
 
-### 技巧1：鼠标悬浮看变量
-- 不用手动解混淆
-- 浏览器自动显示真实值
-- 节省大量时间
+我重新走一遍调用流程，锁定核心生成语句： `e = (0,i[Jt])((0,i[Qt])(a, d))` 这行就是生成加密字符串的核心入口，分两层函数，逐层跟进拆开：
 
-### 技巧2：单步调试观察变化
-- 逐步执行，观察变量变化
-- 找到关键转换点
-- 记录输入输出
+1. 内层 `(0,i[Qt])(a, d)` 对应函数 h，是核心异或加密逻辑：
 
-### 技巧3：控制台打印中间值
-- 在关键位置加断点
-- 控制台输出变量值
-- 验证逻辑正确性
+```
+function h(n, t) {
+                t = t || u();
+                for (var e = (n = n[$5](N))[z], r = t[z], a = q5, i = H; i < e; i++)
+                    n[i] = o(n[i][a](H) ^ t[(i + 10) % r][a](H));
+                return n[I5](N)
+}
+```
 
-![调试截图](./image-20260816154138119.png)
+1. 外层 `(0,i[Jt])()` 对应函数 p，负责转码处理：
 
----
+```
+function p(t) {
+                t = R[V5](t)[T](/%([0-9A-F]{2})/g, function(n, t) {
+                    return o(Y5 + t)
+                });
+                try {
+                    return R[Q5](t)
+                } catch (n) {
+                    return R[W5][K5](t)[U5](Z5)
+                }
+}
+```
 
-## 本地实现
+## OB 混淆代码调试小技巧
 
-![本地实现1](./image-20260816154653885.png)
+整套 JS 是标准 OB 混淆，变量全是无意义单字母、随机命名，直接看完全读不懂。 浏览器控制台自带调试优化，把鼠标悬浮在混淆变量上，会自动显示变量对应的真实值与引用内容，不用手动挨个解混淆，大幅降低调试难度。
 
-![本地实现2](./image-20260816154255826.png)
+## 本地逻辑还原
 
----
+把剥离出来的两段核心加密函数完整抠出，整理加密流程，在本地 Python 环境复现生成 analysis 参数的逻辑。 相关调试截图保存路径：
 
-## 学到的经验
+1. 浏览器混淆代码调试截图：![image-20260816154634134](./image-20260816154138119.png)
+2. 本地代码实现截图 1：![image-20260816154653885](./image-20260816154653885.png)
+3. 本地代码实现截图 2：![image-20260816154705199](./image-20260816154255826.png)
 
-### 1. OB混淆不可怕
-- 看起来吓人，实际有规律
-- 浏览器调试工具很强大
-- 核心是找到加密入口
-
-### 2. 搜索技巧很重要
-- 参数名搜不到 → 搜API路径
-- API路径搜不到 → 搜关键字符串
-- 多种方法结合使用
-
-### 3. 双层函数要逐层拆解
-- 内层函数：核心加密逻辑
-- 外层函数：编码转换
-- 分开处理，逐个击破
-
-### 4. OB混淆是高价值技能
-- 市面上很多网站用OB
-- 会逆向的人不多
-- 接单价格可以翻倍
-
----
-
-## 商业价值
-
-**OB混淆逆向是市场稀缺技能！**
-
-- 技术难度：⭐⭐⭐⭐⭐
-- 市场需求：⭐⭐⭐⭐⭐
-- 单价范围：¥2000-3500/单
-- 竞争程度：低（会的人少）
-
-掌握OB混淆逆向后，可以接大部分中高端项目。
-
----
-
-## 相关项目
-
-- [烯牛数据双参数加密](../烯牛数据/)
-- [EasyPaper拦截器逆向](../EasyPaper题库/)
-- [一品威客双重加密](../一品威客/)
-
+希望我的逆向思路对你有帮助
 ---
 
 ## ⚠️ 免责声明

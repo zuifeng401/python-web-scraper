@@ -1,73 +1,119 @@
-# 烯牛数据 - payload+sig双参数加密 + 响应解密
+# 烯牛数据逆向笔记
 
-## 项目信息
+目标网址：https://vip.xiniudata.com/lib2/project_oversea?p_menu=237
 
-- **网站**：https://vip.xiniudata.com/
-- **难度**：⭐⭐⭐⭐⭐（高级）
-- **技术**：异或+Base64+MD5组合 + 统一拦截器 + 双向加解密
-- **完成时间**：2024
+打开网页抓包，拿接口`https://vip.xiniudata.com/api/vip/feature/check_feature_toggle`来分析。能看到请求载荷里面有两个加密字段：`payload`和`sig`，同时接口返回体也是加密后的内容，所以本次逆向要搞定两件事：请求参数加密、后端返回数据解密。
 
----
+## 定位加密入口
 
-## 技术亮点
+一开始我打算直接搜`payload`关键词，结果搜出来两百多条，内容太多，根本没法快速定位。 换个思路，直接搜索接口路径`feature/check_feature_toggle`，只匹配到 3 处结果。挨个下断点测试，在第三个位置成功断住，不过此时看参数还没有做加密处理，只能顺着调用栈继续往里面跟。
 
-### 🔥 双参数加密系统
+跟踪到这一行： `r.a.fetch("/api/vip/feature/check_feature_toggle", n)` 这里只是把 url 和参数传给另一个封装好的请求函数，继续跟进，就进到下面这个核心拦截器函数：
 
-1. **payload加密**：异或 → Base64编码
-2. **sig签名**：MD5(payload + 盐值)
-3. **响应解密**：Base64解码 → 异或还原
-
-### 🔥 统一拦截器封装
-
-- 所有请求统一处理
-- 加密和解密在同一个拦截器
-- 需要理解整体流程，不能盲目跟栈
-
----
-
-## 逆向过程
-
-### Step 1：搜索定位
-
-**问题**：搜索`payload`关键词 → 200+结果
-**解决**：换搜API路径`feature/check_feature_toggle` → 3个结果
-
-在第3个位置下断点 → 成功断住 → 但参数未加密 → 继续跟栈
-
----
-
-### Step 2：找到拦截器
-
-跟进到核心拦截器函数：
-```javascript
+```
 value: function(t, n, o) {
     if (t.startsWith("/data-biz"))
-        return ... // 特殊分支
-    
+        return l()(t, (a = n,
+        {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json",
+                cookie: b()
+            },
+            body: a
+        })).then(function(e) {
+            return e.json()
+        }).then(function(r) {
+            return 0 !== r.code && (r.code || r.error) && Object(c.a)(e.ctx, t, {
+                http_status: 200,
+                request_payload: n,
+                api_response_body: r
+            }),
+            10003 === r.code && (window.location.href = "/login"),
+            r
+        });
+    var a;
+    t = g(t);
+    var i = !1;
+    (t.indexOf("/api2/service/x_service/system_") >= 0 || t.indexOf("/api/company") >= 0 || t.indexOf("/api/search/deal") >= 0 || t.indexOf("/llm_qa_api") >= 0) && (i = !0,
+    r = null);
     var u = JSON.stringify(n)
-    var d = JSON.parse(u);
-    d.v = -20180620;
-    
-    // 核心加密逻辑
-    if (!i && x()) {
+      , d = JSON.parse(u);
+    if (d.v = -20180620,
+    !i && x()) {
         null == r && (r = 1);
         var f = Object(s.c)(Object(s.d)(JSON.stringify(d.payload)))
-        var p = Object(s.e)(f);
+          , p = Object(s.e)(f);
         d.payload = f,
         d.sig = p,
         d.v = Number(r)
     }
-    
-    return l()(t, y(d)).then(...)
+    return l()(t, y(d)).then(function(e) {
+        return e.json()
+    }).then(function(n) {
+        if (0 !== n.code && (n.code || n.error) && Object(c.a)(e.ctx, t, {
+            http_status: 200,
+            request_payload: d,
+            api_response_body: n
+        }),
+        i)
+            return w(n.code),
+            n;
+        if (x()) {
+            var r, a = n.v, l = n.d;
+            if (2 === a) {
+                var u = new B
+                  , f = u.d1(l);
+                  r = u.d2(f)
+            } else if (1 === a) {
+                var p = Object(s.a)(l)
+                  , h = Object(s.b)(p)
+                  , m = JSON.parse(h);
+                  "function" == typeof o && o(m),
+                  r = m
+            } else
+                r = n;
+            return r
+        }
+        return e.error || w(n.code),
+        n
+    }).catch(function(n) {
+        return Object(c.a)(e.ctx, t, {
+            error_msg: JSON.stringify(n),
+            request_payload: d,
+            http_status: n.status
+        }),
+        {
+            code: -999
+        }
+    })
 }
 ```
 
----
+进来之后先看最上方的 if 判断，浏览器里面跑出来条件是 false，不会进入 /data‑biz 特殊分支，继续往下走。
 
-### Step 3：payload加密拆解
+```
+u = JSON.stringify(n)
+d = JSON.parse(u)
+```
 
-#### 第一步：异或处理
-```javascript
+这里的 n 就是最开始传进来的原始请求参数，拷贝一份到 d 对象，后面加密操作都是基于 d 来做。 继续往下，就看到生成加密字段的核心代码：
+
+```
+var f = Object(s.c)(Object(s.d)(JSON.stringify(d.payload)))
+var p = Object(s.e)(f);
+d.payload = f,
+d.sig = p,
+d.v = Number(r)
+```
+
+到这里请求加密的入口就找到了，顺着引用跳转去找每一个函数的实现。
+
+### payload 加密拆解
+
+1. `Object(s.d)` 跳转到函数`e2`，是异或处理逻辑
+
+```
 function e2(e) {
     if (null == (e = _u_e(e)))
         return null;
@@ -79,13 +125,9 @@ function e2(e) {
 }
 ```
 
-**关键常量**：
-```javascript
-var _p = "W5D80NFZHAYB8EUI2T649RT2MNRMVE2O";
-```
+1. `Object(s.c)` 对应函数`e1`，做 base64 编码
 
-#### 第二步：Base64编码
-```javascript
+```
 function e1(e) {
     if (null == e)
         return null;
@@ -100,44 +142,56 @@ function e1(e) {
 }
 ```
 
-**关键常量**：
-```javascript
-var _keyStr = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/="
+这个函数依赖两个全局常量，直接在 JS 上方可以找到：
+
+```
+var _keyStr ="ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/="
+var _p = "W5D80NFZHAYB8EUI2T649RT2MNRMVE2O";
 ```
 
-**完整流程**：
+执行顺序：原始 payload JSON 字符串 → e2 异或处理 → e1 base64 编码，得到最终`d.payload`。
+
+### sig 签名拆解
+
+`d.sig`由`Object(s.e)(f)`生成，对应 sig 函数：
+
 ```
-原始payload JSON字符串 → e2异或 → e1 Base64 → d.payload
-```
-
----
-
-### Step 4：sig签名生成
-
-```javascript
 function sig(e) {
     return md5(e + _p).toUpperCase()
 }
 ```
 
-**逻辑**：payload密文 + 盐值`_p` → MD5 → 大写
+逻辑很简单：把处理完的 payload 拼接上`_p`盐值，做 MD5 再转大写，本地直接复现即可。
 
----
+## 响应数据解密逆向
 
-### Step 5：响应数据解密
+这块刚学的时候踩了不少坑，这个拦截器是统一封装的，不是发完请求立刻就解密，中间会经过多层处理，如果不看懂整体 JS 流程，盲目跟栈会跟得头大。
 
-在拦截器的then回调中：
-```javascript
+```
+return l()(t, y(d)).then(function(e) {
+    return e.json()
+}).then(function(n) {
+```
+
+这里的变量 n，就是服务器返回的原始 JSON 响应，抓到 n 之后，就可以顺着往下找解密逻辑。
+
+往下走到 v=1 的解密分支：
+
+```
 else if (1 === a) {
-    var p = Object(s.a)(l)    // Base64解码
-    var h = Object(s.b)(p)    // 异或还原
-    var m = JSON.parse(h);
+    var p = Object(s.a)(l)
+    , h = Object(s.b)(p)
+    , m = JSON.parse(h);
+    "function" == typeof o && o(m),
     r = m
 }
 ```
 
-#### Base64解码
-```javascript
+`l = n.d`，就是后端返回的密文字段。
+
+1. `Object(s.a)`对应 d1 函数，base64 解码
+
+```
 function d1(e) {
     var t, n, r, o, a, i, l = "", s = 0;
     for (e = e.replace(/[^A-Za-z0-9\+\/\=]/g, ""); s < e.length; )
@@ -151,8 +205,9 @@ function d1(e) {
 }
 ```
 
-#### 异或还原
-```javascript
+1. `Object(s.b)`对应 d2 函数，异或还原，最后调用`_u_d`做处理
+
+```
 function d2(e) {
     for (var t = "", n = 0; n < e.length; n++) {
         var r = _p.charCodeAt(n % _p.length);
@@ -162,77 +217,19 @@ function d2(e) {
 }
 ```
 
-**完整流程**：
-```
-密文n.d → d1 Base64解码 → d2异或还原 → JSON.parse → 明文
-```
+解密流程：密文 n.d → d1 (base64 解码) → d2 (异或还原) → JSON.parse 得到业务明文。
 
----
+## 本地扣代码复现
 
-## 核心参数
+把上面的常量、加密、解密函数全部抠出来，在本地复现整套逻辑。 调试截图路径：
 
-- **异或密钥**：`W5D80NFZHAYB8EUI2T649RT2MNRMVE2O`
-- **Base64字符表**：标准字符表
-- **签名算法**：MD5
-- **签名盐值**：同异或密钥
+![](./image-20260817213234727.png)
 
----
+![](./image-20260817213350449.png)
 
-## 本地实现
+![](./Snipaste_2026-08-17_21-37-34.png)
 
-![实现1](./image-20260817213234727.png)
-
-![实现2](./image-20260817213350449.png)
-
-![实现3](./Snipaste_2026-08-17_21-37-34.png)
-
----
-
-## 学到的经验（作者感悟）
-
-> 这个是我早期练手的逆向项目，这种统一拦截器封装的代码，硬跟栈很容易绕晕。先看懂整体请求流转，找准哪里拿到服务端返回的 n，解密入口就好找很多。
-
-### 1. 统一拦截器的特点
-- 加密和解密在同一个函数
-- 代码结构复杂，层层嵌套
-- 不能只看局部，要理解整体流程
-
-### 2. 不要盲目跟栈
-- 容易迷失在调用链中
-- 先理清请求的完整生命周期
-- 定位关键节点（发送前、接收后）
-
-### 3. 双参数加密很常见
-- payload + sig是经典组合
-- payload保护数据，sig防篡改
-- 掌握后可以应对很多类似网站
-
-### 4. 异或加密要注意
-- 密钥循环使用（n % length）
-- 加密和解密用同一个密钥
-- 简单但有效
-
----
-
-## 商业价值
-
-这个案例展示了以下能力：
-
-1. **统一拦截器逆向**：很多企业级应用都这样设计
-2. **双参数加密处理**：payload + sig组合很常见
-3. **完整的加解密链路**：请求加密 + 响应解密
-4. **问题排查能力**：从盲目跟栈到理解整体流程
-
-市场价值：¥1500-2500/单
-
----
-
-## 相关项目
-
-- [七麦数据OB混淆](../七麦/)
-- [EasyPaper拦截器逆向](../EasyPaper题库/)
-- [一品威客双重加密](../一品威客/)
-
+> 小感悟：这个是我早期练手的逆向项目，这种统一拦截器封装的代码，硬跟栈很容易绕晕。先看懂整体请求流转，找准哪里拿到服务端返回的 n，解密入口就好找很多。
 ---
 
 ## ⚠️ 免责声明
